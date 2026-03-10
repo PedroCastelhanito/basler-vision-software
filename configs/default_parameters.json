@@ -1,0 +1,31 @@
+{
+    "camera_settings": {
+        "serial": null,
+        "settings_path": null,
+        "camera_name": "Camera"
+    },
+    "recording": {
+        "record": true,
+        "out_dir": "output",
+        "fps": 30,
+        "gpu": -1,
+        "ffmpeg_params_cpu": [
+            "-preset", "fast", 
+            "-crf", "21", 
+            "-pix_fmt", "yuv420p"
+        ],
+        "ffmpeg_params_gpu": [
+            "-preset", "p1", 
+            "-tune", "ll", 
+            "-rc", "constqp", 
+            "-qp", "21", 
+            "-bf:v", "0"
+        ]
+    },
+    "preview": {
+        "view": true,
+        "display_scale": 0.25,
+        "window_pos": [100, 100],
+        "display_size": null
+    }
+}
