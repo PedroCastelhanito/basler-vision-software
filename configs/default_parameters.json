@@ -2,23 +2,25 @@
     "camera_settings": {
         "serial": null,
         "settings_path": null,
-        "camera_name": "Camera"
+        "camera_name": "Camera",
+        "debug": false
     },
     "recording": {
         "record": true,
-        "out_dir": "output",
+        "video_filename": "video.mp4",
+        "out_dir": "C:\\Users\\Reiter U - Pedro\\Desktop\\tmp",
         "fps": 30,
         "gpu": -1,
+        "output_pixel_format": "yuv420p",
         "ffmpeg_params_cpu": [
-            "-preset", "fast", 
-            "-crf", "21", 
-            "-pix_fmt", "yuv420p"
+            "-preset", "fast",
+            "-crf", "21"
         ],
         "ffmpeg_params_gpu": [
-            "-preset", "p1", 
-            "-tune", "ll", 
-            "-rc", "constqp", 
-            "-qp", "21", 
+            "-preset", "p1",
+            "-tune", "ll",
+            "-rc", "constqp",
+            "-qp", "21",
             "-bf:v", "0"
         ]
     },

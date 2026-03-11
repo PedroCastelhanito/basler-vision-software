@@ -24,10 +24,7 @@ def preprocess_frame(frame, pixel_format):
 
 
 class FrameSubscriber:
-    """
-    Broadcast-capable subscriber that handles frame queueing and pre-processing.
-    Automatically detects if a frame needs debayering or if it is monochrome.
-    """
+    """Queue-backed frame consumer used by recorder, GUI, and callback helpers."""
 
     def __init__(self, stop_event, pixel_format='gray', maxlen=10):
         self.stop_event = stop_event
@@ -39,10 +36,6 @@ class FrameSubscriber:
         self.conv_code = get_conversion_code(self.pixel_format)
 
     def push(self, frame, timestamp, processed=False):
-        """
-        Processes the frame (debayer if color, pass-through if mono)
-        and adds it to the subscriber's queue.
-        """
         if not processed and self.conv_code is not None:
             frame = cv2.cvtColor(frame, self.conv_code)
 
@@ -51,13 +44,55 @@ class FrameSubscriber:
             self.condition.notify_all()
 
     def grab(self, timeout=0.1):
-        """Blocks until a processed frame is available or timeout occurs."""
         with self.lock:
             if not self.queue and not self.stop_event.is_set():
                 self.condition.wait(timeout)
             if self.queue:
                 return self.queue.popleft()
             return None, None
+
+    def get_nowait(self):
+        with self.lock:
+            if self.queue:
+                return self.queue.popleft()
+            return None, None
+
+    def clear(self):
+        with self.lock:
+            self.queue.clear()
+
+    def pending_count(self):
+        with self.lock:
+            return len(self.queue)
+
+
+class QueueSubscriber(FrameSubscriber):
+    """Public queue subscriber for external scripts that want pull-based access."""
+
+
+class LatestFrameSubscriber(FrameSubscriber):
+    """Stores the latest frame so GUI code can poll without draining a queue."""
+
+    def __init__(self, stop_event, pixel_format='gray'):
+        super().__init__(stop_event, pixel_format, maxlen=1)
+        self._latest = None
+        self._latest_lock = threading.Lock()
+
+    def push(self, frame, timestamp, processed=False):
+        if not processed and self.conv_code is not None:
+            frame = cv2.cvtColor(frame, self.conv_code)
+        with self._latest_lock:
+            self._latest = (frame, timestamp)
+        with self.lock:
+            self.queue.clear()
+            self.queue.append((frame, timestamp))
+            self.condition.notify_all()
+
+    def get_latest(self):
+        with self._latest_lock:
+            if self._latest is None:
+                return None, None
+            return self._latest
 
 
 class VideoSubscriber(FrameSubscriber):
@@ -71,12 +106,36 @@ class VideoSubscriber(FrameSubscriber):
     def start(self):
         self.thread.start()
 
+    def join(self, timeout=None):
+        self.thread.join(timeout=timeout)
+
     def _process(self):
-        while not self.stop_event.is_set() or len(self.queue) > 0:
+        while not self.stop_event.is_set() or self.pending_count() > 0:
             frame, _ = self.grab()
             if frame is not None:
                 self.writer.write(frame)
         self.writer.close()
+
+
+class CallbackSubscriber(FrameSubscriber):
+    """Dispatches frames to a callback on a worker thread."""
+
+    def __init__(self, callback, stop_event, pixel_format='gray', max_queue=10):
+        super().__init__(stop_event, pixel_format, maxlen=max_queue)
+        self.callback = callback
+        self.thread = threading.Thread(target=self._process, daemon=True)
+
+    def start(self):
+        self.thread.start()
+
+    def join(self, timeout=None):
+        self.thread.join(timeout=timeout)
+
+    def _process(self):
+        while not self.stop_event.is_set() or self.pending_count() > 0:
+            frame, timestamp = self.grab()
+            if frame is not None:
+                self.callback(frame, timestamp)
 
 
 class DisplaySubscriber(FrameSubscriber):
@@ -88,6 +147,12 @@ class DisplaySubscriber(FrameSubscriber):
         self.pos = config.get('window_pos', (100, 100))
         self.scale = config.get('display_scale', 0.25)
 
+    def render_frame(self, frame):
+        h, w = frame.shape[:2]
+        disp = cv2.resize(frame, (int(w * self.scale), int(h * self.scale)))
+        cv2.imshow(self.window_name, disp)
+        return disp
+
     def run_ui_loop(self):
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
         cv2.moveWindow(self.window_name, self.pos[0], self.pos[1])
@@ -95,9 +160,7 @@ class DisplaySubscriber(FrameSubscriber):
         while not self.stop_event.is_set():
             frame, _ = self.grab()
             if frame is not None:
-                h, w = frame.shape[:2]
-                disp = cv2.resize(frame, (int(w * self.scale), int(h * self.scale)))
-                cv2.imshow(self.window_name, disp)
+                self.render_frame(frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     self.stop_event.set()
-        cv2.destroyAllWindows()
+        cv2.destroyWindow(self.window_name)
