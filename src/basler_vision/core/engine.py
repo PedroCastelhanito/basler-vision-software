@@ -1,8 +1,8 @@
 import multiprocessing as mp
 import signal
 
-from core.logging_utils import log_step
-from core.process import camera_stream_process
+from basler_vision.core.logging_utils import log_step
+from basler_vision.core.process import camera_stream_process
 
 
 def _run_stream(cfg, stop_event):
@@ -47,3 +47,4 @@ class ExperimentEngine:
                 log_step('ExperimentEngine.stop', f'Process {p.pid} still alive, terminating.', self.configs, always=True)
                 p.terminate()
                 p.join(timeout=5)
+

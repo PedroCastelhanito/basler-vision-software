@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "basler-vision"
+version = "0.1.0"
+description = "Basler camera discovery, control, streaming, and recording utilities."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [
+  { name = "Pedro Reiter Lab" },
+]
+dependencies = [
+  "imageio-ffmpeg>=0.4.9",
+  "numpy>=1.24",
+  "opencv-python>=4.8",
+  "pypylon>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+basler-vision-debug = "basler_vision.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+basler_vision = ["configs/*.json", "configs/*.pfs"]

@@ -1,0 +1,197 @@
+Metadata-Version: 2.4
+Name: basler-vision
+Version: 0.1.0
+Summary: Basler camera discovery, control, streaming, and recording utilities.
+Author: Pedro Reiter Lab
+License: Proprietary
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: imageio-ffmpeg>=0.4.9
+Requires-Dist: numpy>=1.24
+Requires-Dist: opencv-python>=4.8
+Requires-Dist: pypylon>=3.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+
+# basler-vision
+
+`basler-vision` is a small Python package for Basler camera discovery, configuration, preview streaming, and recording. It is designed to install cleanly into the existing `CephVR2.0` conda environment and to serve as the camera backend for `reiter-cephalopod-vr-software`.
+
+## What this package provides
+
+- Basler camera enumeration through `pypylon`
+- A hardware wrapper for opening, configuring, grabbing, and closing cameras
+- A reusable streaming controller for preview, callbacks, and recording
+- Video and metadata writers for experiment output
+- Packaged default configuration assets
+- A console debug entry point for smoke testing
+
+## Repository layout
+
+```text
+basler-vision-software/
+  pyproject.toml
+  requirements.txt
+  README.md
+  debug.py
+  src/
+    basler_vision/
+      __init__.py
+      cli.py
+      resources.py
+      configs/
+      core/
+      hardware/
+      output/
+```
+
+The package uses a `src/` layout and a namespaced import root, which avoids collisions with generic module names such as `core` or `hardware`.
+
+## Installation in `CephVR2.0`
+
+From a shell with conda available:
+
+```powershell
+conda activate CephVR2.0
+cd E:\software\basler-vision-software
+pip install -r requirements.txt
+pip install -e .
+```
+
+Editable install is recommended during integration work so changes in this repo are visible immediately inside the CephVR GUI environment.
+
+## Quick start
+
+### Python API
+
+```python
+from basler_vision import BaslerCamera, CameraStreamController
+
+devices = BaslerCamera.enumerate_devices()
+print(devices)
+
+controller = CameraStreamController(
+    {
+        "camera_name": "PreviewCam",
+        "serial": devices[0]["serial"],
+        "record": False,
+        "view": False,
+        "fps": 30,
+    }
+)
+
+controller.open_camera()
+latest = controller.create_latest_frame_subscriber()
+controller.start()
+
+frame, timestamp = latest.get_latest()
+print(timestamp, None if frame is None else frame.shape)
+
+controller.cleanup()
+```
+
+### Debug CLI
+
+```powershell
+conda activate CephVR2.0
+basler-vision-debug --duration 10 --view --camera-name DebugCam
+```
+
+You can also run the repository helper directly:
+
+```powershell
+python .\debug.py --duration 10 --view
+```
+
+## Packaged configuration assets
+
+The package includes camera configuration files under `basler_vision/configs/`.
+
+Use the helper functions:
+
+```python
+from basler_vision import get_default_config_path, get_packaged_config_path
+
+default_json = get_default_config_path()
+camera_pfs = get_packaged_config_path("acA4024-29uc_23439562.pfs")
+```
+
+## Runtime configuration shape
+
+JSON configs are flattened at runtime from three sections:
+
+- `camera_settings`
+- `recording`
+- `preview`
+
+Example:
+
+```json
+{
+  "camera_settings": {
+    "serial": null,
+    "settings_path": null,
+    "camera_name": "Camera",
+    "debug": false
+  },
+  "recording": {
+    "record": true,
+    "video_filename": "video.mp4",
+    "out_dir": "C:\\temp",
+    "fps": 30
+  },
+  "preview": {
+    "view": true,
+    "display_scale": 0.25,
+    "window_pos": [100, 100]
+  }
+}
+```
+
+## Integrating with `reiter-cephalopod-vr-software`
+
+Recommended imports:
+
+```python
+from basler_vision import BaslerCamera, CameraStreamController
+```
+
+Recommended pattern:
+
+1. Enumerate devices once from the GUI bridge layer.
+2. Create one controller per connected serial number.
+3. Use `LatestFrameSubscriber` for GUI preview polling.
+4. Keep direct `pypylon` access inside this package, not in the GUI.
+
+## Development notes
+
+- Python 3.10+ is required.
+- `pypylon` and the Basler runtime must be installed on the machine.
+- The package is Windows-oriented today because the current experiment stack is Windows-based.
+- The GUI should use this package in-process for connect, preview, and disconnect operations.
+- Long-running multiprocessing workflows should remain optional and separate from the GUI bridge.
+
+## Troubleshooting
+
+### No cameras detected
+
+- Confirm the camera is visible in Basler Pylon Viewer.
+- Confirm no other process already owns the device.
+- Confirm the correct USB or GigE transport drivers are installed.
+
+### Import errors after install
+
+- Re-activate `CephVR2.0`.
+- Re-run `pip install -e .`.
+- Check `python -c "import basler_vision; print(basler_vision.__file__)"`.
+
+### Slow disconnects
+
+If GUI disconnect feels slow, reduce camera grab timeouts in GUI mode and ensure acquisition is stopped before waiting on worker threads.
+
+## Recommended next cleanup steps
+
+- Add unit tests around config normalization and non-hardware subscribers.
+- Split hardware-facing integration tests behind an explicit marker.
+- Add a dedicated GUI bridge module in the CephVR repo instead of importing internal package modules directly.
+- Introduce structured logging instead of plain print-style logging if session diagnostics become more important.

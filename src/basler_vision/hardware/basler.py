@@ -2,8 +2,8 @@ import os
 
 from pypylon import pylon
 
-from core.logging_utils import log_step
-from hardware.base import AbstractCamera
+from basler_vision.core.logging_utils import log_step
+from basler_vision.hardware.base import AbstractCamera
 
 
 class BaslerCamera(AbstractCamera):
@@ -154,6 +154,37 @@ class BaslerCamera(AbstractCamera):
     def get_parameters(self, names):
         return {name: self.get_parameter(name) for name in names}
 
+    def get_parameter_limits(self, name):
+        node = self.get_node(name)
+
+        minimum = None
+        maximum = None
+        increment = None
+
+        if hasattr(node, 'GetMin'):
+            minimum = node.GetMin()
+        elif hasattr(node, 'Min'):
+            minimum = node.Min
+
+        if hasattr(node, 'GetMax'):
+            maximum = node.GetMax()
+        elif hasattr(node, 'Max'):
+            maximum = node.Max
+
+        if hasattr(node, 'GetInc'):
+            try:
+                increment = node.GetInc()
+            except Exception:
+                increment = None
+        elif hasattr(node, 'Inc'):
+            increment = node.Inc
+
+        return {
+            'min': minimum,
+            'max': maximum,
+            'inc': increment or 1,
+        }
+
     def set_parameter(self, name, value):
         node = self.get_node(name)
         self._write_node_value(node, value)
@@ -215,15 +246,24 @@ class BaslerCamera(AbstractCamera):
 
     def grab(self, timeout_ms=5000):
         cam = self._require_camera()
+        if not cam.IsGrabbing():
+            return None, None
+
         res = cam.RetrieveResult(timeout_ms, pylon.TimeoutHandling_ThrowException)
         try:
-            if res.GrabSucceeded():
+            if not res or not res.GrabSucceeded():
+                return None, None
+            try:
                 img = res.Array.copy()
                 ts = res.TimeStamp * 1e-9
-                return img, ts
-            return None, None
+            except Exception as exc:
+                if 'No grab result data is referenced' in str(exc):
+                    return None, None
+                raise
+            return img, ts
         finally:
-            res.Release()
+            if res is not None:
+                res.Release()
 
     def grab_many(self, count, timeout_ms=5000):
         frames = []
@@ -247,3 +287,4 @@ class BaslerCamera(AbstractCamera):
                 self.camera.Close()
             log_step('BaslerCamera.close', f'Camera {self.serial or "unknown"} closed.', self.log_config)
         return self
+

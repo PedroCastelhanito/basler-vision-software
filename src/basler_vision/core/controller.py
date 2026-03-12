@@ -1,9 +1,9 @@
 import threading
 import time
 
-from core.logging_utils import log_step
-from core.paths import build_metadata_path, build_video_path
-from core.subscribers import (
+from basler_vision.core.logging_utils import log_step
+from basler_vision.core.paths import build_metadata_path, build_video_path
+from basler_vision.core.subscribers import (
     CallbackSubscriber,
     DisplaySubscriber,
     LatestFrameSubscriber,
@@ -11,9 +11,9 @@ from core.subscribers import (
     VideoSubscriber,
     preprocess_frame,
 )
-from hardware.basler import BaslerCamera
-from output.metadata import MetadataWriter
-from output.writer import VideoWriter
+from basler_vision.hardware.basler import BaslerCamera
+from basler_vision.output.metadata import MetadataWriter
+from basler_vision.output.writer import VideoWriter
 
 
 class CameraStreamController:
@@ -39,6 +39,7 @@ class CameraStreamController:
         self.raw_pixel_format = self.config.get('pixel_format', 'gray')
         self.fps = self.config.get('fps')
         self.frame_index = 0
+        self.grab_timeout_ms = int(self.config.get('grab_timeout_ms', 250))
         self._cleaned_up = False
 
     def open_camera(self):
@@ -188,10 +189,9 @@ class CameraStreamController:
                 'CameraStreamController._publisher_loop',
                 f'Camera stream running for {self.config.get("camera_name", "camera")}.',
                 self.config,
-                always=True,
             )
             while not self.stop_event.is_set():
-                frame, timestamp = self.camera.grab()
+                frame, timestamp = self.camera.grab(timeout_ms=self.grab_timeout_ms)
                 if frame is None:
                     continue
 
@@ -278,3 +278,4 @@ class CameraStreamController:
 
 class CameraStreamPublisher(CameraStreamController):
     """Backward-compatible alias for code that prefers the publisher naming."""
+

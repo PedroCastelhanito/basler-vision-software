@@ -1,7 +1,7 @@
 import csv
 import os
 
-from core.logging_utils import log_step
+from basler_vision.core.logging_utils import log_step
 
 
 class MetadataWriter:
@@ -35,3 +35,4 @@ class MetadataWriter:
             self.file.flush()
             self.file.close()
             log_step('MetadataWriter.close', f'Metadata file closed for {self.path}.', self.log_config)
+

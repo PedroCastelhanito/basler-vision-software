@@ -1,5 +1,5 @@
-from core.controller import CameraStreamController
-from core.logging_utils import log_step
+from basler_vision.core.controller import CameraStreamController
+from basler_vision.core.logging_utils import log_step
 
 
 def camera_stream_process(config, stop_event=None):
@@ -20,3 +20,4 @@ def camera_stream_process(config, stop_event=None):
     finally:
         log_step('camera_stream_process', f'Cleaning up stream for {camera_name}.', controller.config, always=True)
         controller.cleanup()
+

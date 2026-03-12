@@ -3,7 +3,7 @@ import os
 import numpy as np
 from imageio_ffmpeg import write_frames
 
-from core.logging_utils import log_step
+from basler_vision.core.logging_utils import log_step
 
 
 class VideoWriter:
@@ -119,3 +119,4 @@ class VideoWriter:
         if self.writer:
             self.writer.close()
             log_step('VideoWriter.close', f'Writer closed for {self.path}.', self.log_config)
+
