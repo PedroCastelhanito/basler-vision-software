@@ -102,6 +102,11 @@ class CameraStreamController:
 
     def enable_preview(self):
         self.config['view'] = True
+        if self.config.get('disable_native_preview', False):
+            if self.latest_frame_subscriber is None:
+                self.latest_frame_subscriber = LatestFrameSubscriber(self.stop_event, self.raw_pixel_format)
+                self.add_subscriber(self.latest_frame_subscriber)
+            return self.latest_frame_subscriber
         if self.display_subscriber is None:
             self.display_subscriber = DisplaySubscriber(self.stop_event, self.config)
             self.add_subscriber(self.display_subscriber)
