@@ -95,19 +95,39 @@ class LatestFrameSubscriber(FrameSubscriber):
             return self._latest
 
 
-class VideoSubscriber(FrameSubscriber):
-    """Subscribes to the stream to encode and save video."""
+class ThreadedFrameSubscriber(FrameSubscriber):
+    """Base class for subscribers that process frames on a reusable worker thread."""
 
-    def __init__(self, writer, stop_event, pixel_format='gray', max_queue=None):
-        super().__init__(stop_event, pixel_format, maxlen=max_queue)
-        self.writer = writer
-        self.thread = threading.Thread(target=self._process, daemon=True)
+    def __init__(self, stop_event, pixel_format='gray', maxlen=10, *, thread_name=None):
+        super().__init__(stop_event, pixel_format, maxlen=maxlen)
+        self.thread = None
+        self._thread_name = thread_name or type(self).__name__
+
+    def _create_thread(self):
+        return threading.Thread(target=self._process, name=self._thread_name, daemon=True)
 
     def start(self):
+        thread = self.thread
+        if thread is not None and thread.is_alive():
+            return
+        self.thread = self._create_thread()
         self.thread.start()
 
     def join(self, timeout=None):
-        self.thread.join(timeout=timeout)
+        thread = self.thread
+        if thread is not None:
+            thread.join(timeout=timeout)
+
+    def _process(self):
+        raise NotImplementedError
+
+
+class VideoSubscriber(ThreadedFrameSubscriber):
+    """Subscribes to the stream to encode and save video."""
+
+    def __init__(self, writer, stop_event, pixel_format='gray', max_queue=None):
+        super().__init__(stop_event, pixel_format, maxlen=max_queue, thread_name="VideoSubscriber")
+        self.writer = writer
 
     def _process(self):
         while not self.stop_event.is_set() or self.pending_count() > 0:
@@ -117,19 +137,12 @@ class VideoSubscriber(FrameSubscriber):
         self.writer.close()
 
 
-class CallbackSubscriber(FrameSubscriber):
+class CallbackSubscriber(ThreadedFrameSubscriber):
     """Dispatches frames to a callback on a worker thread."""
 
     def __init__(self, callback, stop_event, pixel_format='gray', max_queue=10):
-        super().__init__(stop_event, pixel_format, maxlen=max_queue)
+        super().__init__(stop_event, pixel_format, maxlen=max_queue, thread_name="CallbackSubscriber")
         self.callback = callback
-        self.thread = threading.Thread(target=self._process, daemon=True)
-
-    def start(self):
-        self.thread.start()
-
-    def join(self, timeout=None):
-        self.thread.join(timeout=timeout)
 
     def _process(self):
         while not self.stop_event.is_set() or self.pending_count() > 0:
