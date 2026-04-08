@@ -15,7 +15,7 @@ authors = [
 dependencies = [
   "imageio-ffmpeg>=0.4.9",
   "numpy>=1.24",
-  "opencv-python>=4.8",
+  "opencv-contrib-python-rolling",
   "pypylon>=3.0",
 ]
 
