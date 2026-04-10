@@ -119,4 +119,4 @@ class VideoWriter:
         if self.writer:
             self.writer.close()
             log_step('VideoWriter.close', f'Writer closed for {self.path}.', self.log_config)
-
+            self.writer = None

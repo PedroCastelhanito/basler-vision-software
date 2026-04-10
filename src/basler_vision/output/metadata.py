@@ -31,8 +31,9 @@ class MetadataWriter:
             self.writer.writerow([index, elapsed])
 
     def close(self):
-        if self.file:
+        if self.file and not self.file.closed:
             self.file.flush()
             self.file.close()
             log_step('MetadataWriter.close', f'Metadata file closed for {self.path}.', self.log_config)
-
+        self.file = None
+        self.writer = None

@@ -45,7 +45,12 @@ class FrameSubscriber:
 
     def grab(self, timeout=0.1):
         with self.lock:
-            if not self.queue and not self.stop_event.is_set():
+            stop_requested = getattr(self, '_stop_requested', None)
+            if (
+                not self.queue
+                and not self.stop_event.is_set()
+                and not (stop_requested is not None and stop_requested.is_set())
+            ):
                 self.condition.wait(timeout)
             if self.queue:
                 return self.queue.popleft()
@@ -102,6 +107,7 @@ class ThreadedFrameSubscriber(FrameSubscriber):
         super().__init__(stop_event, pixel_format, maxlen=maxlen)
         self.thread = None
         self._thread_name = thread_name or type(self).__name__
+        self._stop_requested = threading.Event()
 
     def _create_thread(self):
         return threading.Thread(target=self._process, name=self._thread_name, daemon=True)
@@ -110,13 +116,26 @@ class ThreadedFrameSubscriber(FrameSubscriber):
         thread = self.thread
         if thread is not None and thread.is_alive():
             return
+        self._stop_requested.clear()
         self.thread = self._create_thread()
         self.thread.start()
+
+    def stop(self):
+        self._stop_requested.set()
+        with self.lock:
+            self.condition.notify_all()
 
     def join(self, timeout=None):
         thread = self.thread
         if thread is not None:
             thread.join(timeout=timeout)
+            if not thread.is_alive():
+                self.thread = None
+
+    def should_run(self):
+        return (
+            not self.stop_event.is_set() and not self._stop_requested.is_set()
+        ) or self.pending_count() > 0
 
     def _process(self):
         raise NotImplementedError
@@ -130,7 +149,7 @@ class VideoSubscriber(ThreadedFrameSubscriber):
         self.writer = writer
 
     def _process(self):
-        while not self.stop_event.is_set() or self.pending_count() > 0:
+        while self.should_run():
             frame, _ = self.grab()
             if frame is not None:
                 self.writer.write(frame)
@@ -145,7 +164,7 @@ class CallbackSubscriber(ThreadedFrameSubscriber):
         self.callback = callback
 
     def _process(self):
-        while not self.stop_event.is_set() or self.pending_count() > 0:
+        while self.should_run():
             frame, timestamp = self.grab()
             if frame is not None:
                 self.callback(frame, timestamp)

@@ -22,6 +22,7 @@ class CameraStreamController:
     def __init__(self, config, camera=None, stop_event=None):
         self.config = dict(config)
         self.stop_event = stop_event or threading.Event()
+        self._subscribers_lock = threading.RLock()
         self.camera = camera or BaslerCamera(
             self.config.get('serial'),
             self.config.get('settings_path'),
@@ -63,22 +64,37 @@ class CameraStreamController:
         return bool(self.publisher_thread and self.publisher_thread.is_alive())
 
     def add_subscriber(self, subscriber, start_if_running=True):
-        self.subscribers.append(subscriber)
+        with self._subscribers_lock:
+            self.subscribers.append(subscriber)
         starter = getattr(subscriber, 'start', None)
         thread = getattr(subscriber, 'thread', None)
         if self.is_running() and start_if_running and callable(starter) and (thread is None or not thread.is_alive()):
             starter()
         return subscriber
 
-    def remove_subscriber(self, subscriber):
-        if subscriber in self.subscribers:
-            self.subscribers.remove(subscriber)
-        if subscriber is self.video_subscriber:
-            self.video_subscriber = None
-        if subscriber is self.display_subscriber:
-            self.display_subscriber = None
-        if subscriber is self.latest_frame_subscriber:
-            self.latest_frame_subscriber = None
+    def _stop_subscriber(self, subscriber, timeout=10):
+        if subscriber is None:
+            return
+        stopper = getattr(subscriber, 'stop', None)
+        if callable(stopper):
+            stopper()
+        joiner = getattr(subscriber, 'join', None)
+        if callable(joiner):
+            joiner(timeout=timeout)
+
+    def remove_subscriber(self, subscriber, *, join_timeout=10):
+        if subscriber is None:
+            return None
+        with self._subscribers_lock:
+            if subscriber in self.subscribers:
+                self.subscribers.remove(subscriber)
+            if subscriber is self.video_subscriber:
+                self.video_subscriber = None
+            if subscriber is self.display_subscriber:
+                self.display_subscriber = None
+            if subscriber is self.latest_frame_subscriber:
+                self.latest_frame_subscriber = None
+        self._stop_subscriber(subscriber, timeout=join_timeout)
         return subscriber
 
     def create_queue_subscriber(self, max_queue=10, pixel_format=None):
@@ -132,6 +148,20 @@ class CameraStreamController:
 
     def disable_recording(self):
         self.config['record'] = False
+        with self._subscribers_lock:
+            video_subscriber = self.video_subscriber
+            metadata_writer = self.metadata_writer
+            video_writer = self.video_writer
+            if video_subscriber in self.subscribers:
+                self.subscribers.remove(video_subscriber)
+            self.video_subscriber = None
+            self.metadata_writer = None
+            self.video_writer = None
+        self._stop_subscriber(video_subscriber, timeout=10)
+        if metadata_writer is not None:
+            metadata_writer.close()
+        if video_writer is not None:
+            video_writer.close()
         return self
 
     def get_latest_frame(self):
@@ -159,9 +189,9 @@ class CameraStreamController:
         metadata_path = build_metadata_path(self.config)
         input_to_writer = 'rgb24' if 'bayer' in self.raw_pixel_format.lower() else self.raw_pixel_format
 
-        self.metadata_writer = MetadataWriter(metadata_path, log_config=self.config)
-        self.metadata_writer.open()
-        self.video_writer = VideoWriter(
+        metadata_writer = MetadataWriter(metadata_path, log_config=self.config)
+        metadata_writer.open()
+        video_writer = VideoWriter(
             video_path,
             self.fps,
             self.config['width'],
@@ -169,19 +199,33 @@ class CameraStreamController:
             input_to_writer,
             writer_config=self.config,
         )
-        self.video_writer.open()
-        self.video_subscriber = VideoSubscriber(
-            self.video_writer,
+        try:
+            video_writer.open()
+        except Exception:
+            metadata_writer.close()
+            raise
+        video_subscriber = VideoSubscriber(
+            video_writer,
             self.stop_event,
             self.raw_pixel_format,
             max_queue=self.config.get('writer_queue_size'),
         )
-        self.add_subscriber(self.video_subscriber, start_if_running=False)
+        with self._subscribers_lock:
+            if self.video_subscriber is not None:
+                metadata_writer.close()
+                video_writer.close()
+                return self.video_subscriber
+            self.metadata_writer = metadata_writer
+            self.video_writer = video_writer
+            self.video_subscriber = video_subscriber
+            self.subscribers.append(video_subscriber)
         log_step('CameraStreamController.enable_recording', f'Recording enabled: {video_path}', self.config, always=True)
-        return self.video_subscriber
+        return video_subscriber
 
     def _start_threaded_subscribers(self):
-        for subscriber in self.subscribers:
+        with self._subscribers_lock:
+            subscribers = list(self.subscribers)
+        for subscriber in subscribers:
             starter = getattr(subscriber, 'start', None)
             thread = getattr(subscriber, 'thread', None)
             if callable(starter) and (thread is None or not thread.is_alive()):
@@ -201,10 +245,13 @@ class CameraStreamController:
                     continue
 
                 processed_frame = preprocess_frame(frame, self.raw_pixel_format)
-                for subscriber in list(self.subscribers):
-                    subscriber.push(processed_frame, timestamp, processed=True)
-                if self.metadata_writer is not None:
-                    self.metadata_writer.log_frame(self.frame_index, timestamp)
+                with self._subscribers_lock:
+                    subscribers = list(self.subscribers)
+                    metadata_writer = self.metadata_writer
+                    for subscriber in subscribers:
+                        subscriber.push(processed_frame, timestamp, processed=True)
+                    if metadata_writer is not None:
+                        metadata_writer.log_frame(self.frame_index, timestamp)
                 self.frame_index += 1
         except Exception as exc:
             self.publisher_error.append(exc)
@@ -254,7 +301,9 @@ class CameraStreamController:
         if self.publisher_thread:
             self.publisher_thread.join(timeout=timeout)
 
-        for subscriber in self.subscribers:
+        with self._subscribers_lock:
+            subscribers = list(self.subscribers)
+        for subscriber in subscribers:
             joiner = getattr(subscriber, 'join', None)
             if callable(joiner):
                 joiner(timeout=timeout)
@@ -264,11 +313,12 @@ class CameraStreamController:
         if self._cleaned_up:
             return self
 
+        record_enabled = bool(self.config.get('record', False))
         self.stop_event.set()
         self.join(timeout=10)
+        self.disable_recording()
+        self.config['record'] = record_enabled
         self.camera.close()
-        if self.metadata_writer is not None:
-            self.metadata_writer.close()
         self._cleaned_up = True
         log_step(
             'CameraStreamController.cleanup',
@@ -283,4 +333,3 @@ class CameraStreamController:
 
 class CameraStreamPublisher(CameraStreamController):
     """Backward-compatible alias for code that prefers the publisher naming."""
-
