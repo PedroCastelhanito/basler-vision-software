@@ -1,3 +1,16 @@
+import os
+import sys
+
+if os.getenv("BASLER_VISION_WRITE_BYTECODE", "").strip().lower() not in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}:
+    sys.dont_write_bytecode = True
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+    os.environ.pop("PYTHONPYCACHEPREFIX", None)
+
 from basler_vision.core import (
     CameraStreamController,
     CameraStreamPublisher,
