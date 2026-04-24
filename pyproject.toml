@@ -36,3 +36,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 basler_vision = ["configs/*.json", "configs/*.pfs"]
+
+[tool.pytest.ini_options]
+addopts = "-p no:cacheprovider"
+cache_dir = "~/.cache/cephvr/pytest/basler-vision-software"

@@ -26,6 +26,11 @@ class ExperimentEngine:
         self.stop_event = self.ctx.Event()
 
     def start(self):
+        self.processes = [process for process in self.processes if process.is_alive()]
+        if self.processes:
+            raise RuntimeError('ExperimentEngine is already running.')
+        if self.stop_event.is_set():
+            self.stop_event = self.ctx.Event()
         log_step('ExperimentEngine.start', f'Starting {len(self.configs)} camera process(es).', self.configs, always=True)
         for cfg in self.configs:
             camera_name = cfg.get('camera_name', 'camera')
@@ -47,4 +52,6 @@ class ExperimentEngine:
                 log_step('ExperimentEngine.stop', f'Process {p.pid} still alive, terminating.', self.configs, always=True)
                 p.terminate()
                 p.join(timeout=5)
+        self.processes = []
+        self.stop_event = self.ctx.Event()
 
