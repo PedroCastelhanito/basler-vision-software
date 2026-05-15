@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 from pypylon import pylon
 
@@ -86,10 +87,80 @@ class BaslerCamera(AbstractCamera):
             raise FileNotFoundError(f'Settings file not found: {settings_path}')
 
         self._require_camera()
-        pylon.FeaturePersistence.Load(settings_path, self.camera.GetNodeMap(), False)
+        try:
+            self._load_settings_file(settings_path)
+        except Exception as exc:
+            if not self._is_unreadable_node_error(exc, 'TriggerActivation'):
+                raise RuntimeError(
+                    f'Failed to load settings from {settings_path}: {exc}'
+                ) from exc
+            filtered_path = self._filtered_pfs_path(
+                settings_path, {'TriggerActivation'}
+            )
+            try:
+                self._load_settings_file(filtered_path)
+            except Exception as retry_exc:
+                raise RuntimeError(
+                    f'Failed to load settings from {settings_path} after skipping '
+                    f'unreadable TriggerActivation entries: {retry_exc}'
+                ) from retry_exc
+            finally:
+                try:
+                    os.unlink(filtered_path)
+                except OSError:
+                    pass
         self.settings_path = settings_path
         log_step('BaslerCamera.load_settings', f'Loaded settings from {settings_path}.', self.log_config)
         return self
+
+    def _load_settings_file(self, settings_path):
+        pylon.FeaturePersistence.Load(settings_path, self.camera.GetNodeMap(), False)
+
+    @staticmethod
+    def _is_unreadable_node_error(exc, node_name):
+        message = str(exc)
+        return node_name in message and 'not readable' in message.lower()
+
+    @staticmethod
+    def _filtered_pfs_path(settings_path, skipped_nodes):
+        skipped_nodes = {str(node) for node in skipped_nodes}
+        with open(settings_path, 'r', encoding='utf-8', errors='replace') as source:
+            lines = source.readlines()
+
+        temp_dirs = [os.path.dirname(os.path.abspath(settings_path)) or None, None]
+        last_error = None
+        handle = None
+        for temp_dir in temp_dirs:
+            try:
+                handle = tempfile.NamedTemporaryFile(
+                    'w',
+                    encoding='utf-8',
+                    suffix='.pfs',
+                    prefix='basler_filtered_',
+                    delete=False,
+                    dir=temp_dir,
+                )
+                break
+            except OSError as exc:
+                last_error = exc
+        if handle is None:
+            raise last_error or OSError('Could not create a filtered PFS file.')
+        try:
+            with handle:
+                for line in lines:
+                    stripped = line.lstrip()
+                    parts = stripped.split(None, 1)
+                    node_name = parts[0] if parts else ''
+                    if node_name in skipped_nodes:
+                        continue
+                    handle.write(line)
+            return handle.name
+        except Exception:
+            try:
+                os.unlink(handle.name)
+            except OSError:
+                pass
+            raise
 
     def save_settings(self, settings_path):
         self._require_camera()
@@ -149,7 +220,14 @@ class BaslerCamera(AbstractCamera):
             if default is not None:
                 return default
             raise
-        return self._read_node_value(node)
+        try:
+            return self._read_node_value(node)
+        except Exception as exc:
+            if default is not None:
+                return default
+            raise RuntimeError(
+                f'Failed to read camera parameter {name}: {exc}'
+            ) from exc
 
     def get_parameters(self, names):
         return {name: self.get_parameter(name) for name in names}
@@ -186,8 +264,13 @@ class BaslerCamera(AbstractCamera):
         }
 
     def set_parameter(self, name, value):
-        node = self.get_node(name)
-        self._write_node_value(node, value)
+        try:
+            node = self.get_node(name)
+            self._write_node_value(node, value)
+        except Exception as exc:
+            raise RuntimeError(
+                f'Failed to set camera parameter {name} to {value}: {exc}'
+            ) from exc
         log_step('BaslerCamera.set_parameter', f'Set {name} to {value}.', self.log_config)
         return value
 
