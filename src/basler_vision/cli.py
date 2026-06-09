@@ -5,6 +5,7 @@ import time
 from basler_vision import get_default_config_path, load_runtime_config
 from basler_vision.core.engine import ExperimentEngine
 from basler_vision.core.logging_utils import log_step
+from basler_vision.runtime_hygiene import cleanup_stale_python_temp_artifacts
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,6 +52,7 @@ def run_test(config_path=None, overrides=None, duration=10.0):
 
 
 def main():
+    cleanup_stale_python_temp_artifacts()
     args = build_parser().parse_args()
     overrides = {
         "camera_name": args.camera_name,
