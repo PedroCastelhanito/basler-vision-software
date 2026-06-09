@@ -88,6 +88,15 @@ def test_alternate_frame_counter_attribute_name():
     assert meta.device_timestamp_s is None
 
 
+def test_counter_value_chunk_is_frame_id_fallback():
+    result = _FakeResult(ChunkCounterValue=_ValueNode(1234))
+
+    meta = extract_chunk_metadata(result)
+
+    assert meta.frame_id == 1234
+    assert meta.device_timestamp_s is None
+
+
 def test_returns_none_when_no_chunk_attributes():
     assert extract_chunk_metadata(_FakeResult()) is None
 

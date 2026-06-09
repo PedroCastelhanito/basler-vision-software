@@ -13,7 +13,12 @@ from dataclasses import dataclass
 
 # Candidate chunk attribute names on a pylon grab result, most-preferred first.
 # Different Basler models expose the frame counter under different names.
-_FRAME_ID_ATTRS = ("ChunkFrameID", "ChunkFramecounter", "ChunkFrameCounter")
+_FRAME_ID_ATTRS = (
+    "ChunkFrameID",
+    "ChunkFramecounter",
+    "ChunkFrameCounter",
+    "ChunkCounterValue",
+)
 _TIMESTAMP_ATTRS = ("ChunkTimestamp",)
 _EXPOSURE_ATTRS = ("ChunkExposureTime",)
 

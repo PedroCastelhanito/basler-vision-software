@@ -12,7 +12,7 @@ class BaslerCamera(AbstractCamera):
     # Chunk features and the ChunkSelector entries that supply them, tried in
     # order (model-dependent naming). See enable_chunk_data.
     CHUNK_FEATURES = {
-        "frame_id": ("FrameID", "Framecounter"),
+        "frame_id": ("FrameID", "Framecounter", "CounterValue"),
         "timestamp": ("Timestamp",),
         "exposure": ("ExposureTime",),
     }
