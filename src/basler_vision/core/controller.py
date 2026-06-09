@@ -45,6 +45,16 @@ class CameraStreamController:
 
     def open_camera(self):
         self.camera.open()
+        if self.config.get('enable_chunk_data') and hasattr(self.camera, 'enable_chunk_data'):
+            try:
+                self.camera.enable_chunk_data()
+            except Exception as exc:
+                log_step(
+                    'CameraStreamController.open_camera',
+                    f'Chunk data could not be enabled: {exc}',
+                    self.config,
+                    always=True,
+                )
         self.refresh_camera_config()
         return self.camera
 
@@ -240,7 +250,7 @@ class CameraStreamController:
                 self.config,
             )
             while not self.stop_event.is_set():
-                frame, timestamp = self.camera.grab(timeout_ms=self.grab_timeout_ms)
+                frame, timestamp, metadata = self.camera.grab(timeout_ms=self.grab_timeout_ms)
                 if frame is None:
                     continue
 
@@ -249,7 +259,7 @@ class CameraStreamController:
                     subscribers = list(self.subscribers)
                     metadata_writer = self.metadata_writer
                     for subscriber in subscribers:
-                        subscriber.push(processed_frame, timestamp, processed=True)
+                        subscriber.push(processed_frame, timestamp, processed=True, metadata=metadata)
                     if metadata_writer is not None:
                         metadata_writer.log_frame(self.frame_index, timestamp)
                 self.frame_index += 1

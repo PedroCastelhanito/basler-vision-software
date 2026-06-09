@@ -13,6 +13,7 @@ from basler_vision.core import (
     merge_config,
 )
 from basler_vision.hardware import BaslerCamera
+from basler_vision.hardware.frame_metadata import FrameMetadata
 from basler_vision.output import MetadataWriter, VideoWriter
 from basler_vision.resources import get_default_config_path, get_packaged_config_path
 
@@ -20,6 +21,7 @@ __all__ = [
     "BaslerCamera",
     "CameraStreamController",
     "CameraStreamPublisher",
+    "FrameMetadata",
     "ExperimentEngine",
     "MetadataWriter",
     "VideoWriter",

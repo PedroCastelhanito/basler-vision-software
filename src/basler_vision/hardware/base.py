@@ -17,7 +17,9 @@ class AbstractCamera(ABC):
 
     @abstractmethod
     def grab(self, timeout_ms=5000):
-        """Grab a single frame and timestamp."""
+        """Grab a single frame as ``(image, timestamp_s, metadata)``.
+
+        ``metadata`` is backend-specific per-frame info (or ``None``)."""
 
     @abstractmethod
     def stop(self):

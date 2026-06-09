@@ -4,14 +4,26 @@ from pypylon import pylon
 
 from basler_vision.core.logging_utils import log_step
 from basler_vision.hardware.base import AbstractCamera
+from basler_vision.hardware.frame_metadata import extract_chunk_metadata
 
 
 class BaslerCamera(AbstractCamera):
+    # Chunk features and the ChunkSelector entries that supply them, tried in
+    # order (model-dependent naming). See enable_chunk_data.
+    CHUNK_FEATURES = {
+        "frame_id": ("FrameID", "Framecounter"),
+        "timestamp": ("Timestamp",),
+        "exposure": ("ExposureTime",),
+    }
+
     def __init__(self, serial_number=None, settings_path=None, log_config=None):
         self.serial = str(serial_number) if serial_number else None
         self.settings_path = settings_path
         self.log_config = log_config
         self.camera = None
+        # Set by enable_chunk_data(); gates the per-grab chunk read so cameras
+        # without chunk support pay no cost on the grab hot path.
+        self._chunk_active = False
 
     @classmethod
     def enumerate_devices(cls):
@@ -226,6 +238,51 @@ class BaslerCamera(AbstractCamera):
         self.apply_parameters(updates)
         return self.get_parameters(updates.keys())
 
+    def enable_chunk_data(self, features=None):
+        """Activate pylon chunk mode so each grab result self-describes.
+
+        Enables the FrameID, device-timestamp, and exposure chunks (or the
+        subset named in ``features``) so :meth:`grab` can attach a
+        :class:`FrameMetadata` to every frame (improvement-plan item 1.1).
+
+        Best-effort by design: ``ChunkModeActive`` or any individual chunk that
+        the connected model does not expose is logged and skipped rather than
+        failing the connection. Must be called while the camera is open and not
+        grabbing. ``self._chunk_active`` reflects whether any chunk was enabled.
+        """
+        self._require_camera()
+        requested = list(features) if features is not None else list(self.CHUNK_FEATURES)
+        try:
+            self.set_parameter("ChunkModeActive", True)
+        except Exception as exc:
+            log_step(
+                "BaslerCamera.enable_chunk_data",
+                f"ChunkModeActive unavailable; chunk data disabled: {exc}",
+                self.log_config,
+                always=True,
+            )
+            self._chunk_active = False
+            return self
+
+        enabled = []
+        for feature in requested:
+            for selector in self.CHUNK_FEATURES.get(feature, ()):
+                try:
+                    self.set_parameter("ChunkSelector", selector)
+                    self.set_parameter("ChunkEnable", True)
+                    enabled.append(selector)
+                    break
+                except Exception:
+                    continue
+        self._chunk_active = bool(enabled)
+        log_step(
+            "BaslerCamera.enable_chunk_data",
+            f"Chunk data enabled for: {enabled or 'none'}.",
+            self.log_config,
+            always=True,
+        )
+        return self
+
     def get_config(self):
         self._require_camera()
         return {
@@ -245,22 +302,29 @@ class BaslerCamera(AbstractCamera):
         return self
 
     def grab(self, timeout_ms=5000):
+        """Grab one frame, returning ``(image, timestamp_s, metadata)``.
+
+        ``metadata`` is a :class:`FrameMetadata` when chunk data is active (see
+        :meth:`enable_chunk_data`) and ``None`` otherwise. The empty result on
+        no-frame / failed grab is ``(None, None, None)``.
+        """
         cam = self._require_camera()
         if not cam.IsGrabbing():
-            return None, None
+            return None, None, None
 
         res = cam.RetrieveResult(timeout_ms, pylon.TimeoutHandling_ThrowException)
         try:
             if not res or not res.GrabSucceeded():
-                return None, None
+                return None, None, None
             try:
                 img = res.Array.copy()
                 ts = res.TimeStamp * 1e-9
             except Exception as exc:
                 if 'No grab result data is referenced' in str(exc):
-                    return None, None
+                    return None, None, None
                 raise
-            return img, ts
+            metadata = extract_chunk_metadata(res) if self._chunk_active else None
+            return img, ts, metadata
         finally:
             if res is not None:
                 res.Release()
@@ -268,10 +332,10 @@ class BaslerCamera(AbstractCamera):
     def grab_many(self, count, timeout_ms=5000):
         frames = []
         for _ in range(count):
-            frame, timestamp = self.grab(timeout_ms=timeout_ms)
+            frame, timestamp, metadata = self.grab(timeout_ms=timeout_ms)
             if frame is None:
                 break
-            frames.append((frame, timestamp))
+            frames.append((frame, timestamp, metadata))
         return frames
 
     def stop(self):

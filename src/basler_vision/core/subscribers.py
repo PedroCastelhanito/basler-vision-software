@@ -35,12 +35,12 @@ class FrameSubscriber:
         self.pixel_format = (pixel_format or 'gray').lower()
         self.conv_code = get_conversion_code(self.pixel_format)
 
-    def push(self, frame, timestamp, processed=False):
+    def push(self, frame, timestamp, processed=False, metadata=None):
         if not processed and self.conv_code is not None:
             frame = cv2.cvtColor(frame, self.conv_code)
 
         with self.lock:
-            self.queue.append((frame, timestamp))
+            self.queue.append((frame, timestamp, metadata))
             self.condition.notify_all()
 
     def grab(self, timeout=0.1):
@@ -54,13 +54,13 @@ class FrameSubscriber:
                 self.condition.wait(timeout)
             if self.queue:
                 return self.queue.popleft()
-            return None, None
+            return None, None, None
 
     def get_nowait(self):
         with self.lock:
             if self.queue:
                 return self.queue.popleft()
-            return None, None
+            return None, None, None
 
     def clear(self):
         with self.lock:
@@ -83,20 +83,21 @@ class LatestFrameSubscriber(FrameSubscriber):
         self._latest = None
         self._latest_lock = threading.Lock()
 
-    def push(self, frame, timestamp, processed=False):
+    def push(self, frame, timestamp, processed=False, metadata=None):
         if not processed and self.conv_code is not None:
             frame = cv2.cvtColor(frame, self.conv_code)
+        item = (frame, timestamp, metadata)
         with self._latest_lock:
-            self._latest = (frame, timestamp)
+            self._latest = item
         with self.lock:
             self.queue.clear()
-            self.queue.append((frame, timestamp))
+            self.queue.append(item)
             self.condition.notify_all()
 
     def get_latest(self):
         with self._latest_lock:
             if self._latest is None:
-                return None, None
+                return None, None, None
             return self._latest
 
 
@@ -150,14 +151,17 @@ class VideoSubscriber(ThreadedFrameSubscriber):
 
     def _process(self):
         while self.should_run():
-            frame, _ = self.grab()
+            frame, _, _ = self.grab()
             if frame is not None:
                 self.writer.write(frame)
         self.writer.close()
 
 
 class CallbackSubscriber(ThreadedFrameSubscriber):
-    """Dispatches frames to a callback on a worker thread."""
+    """Dispatches frames to a callback on a worker thread.
+
+    The callback is invoked as ``callback(frame, timestamp, metadata)`` where
+    ``metadata`` is the per-frame :class:`FrameMetadata` (or ``None``)."""
 
     def __init__(self, callback, stop_event, pixel_format='gray', max_queue=10):
         super().__init__(stop_event, pixel_format, maxlen=max_queue, thread_name="CallbackSubscriber")
@@ -165,9 +169,9 @@ class CallbackSubscriber(ThreadedFrameSubscriber):
 
     def _process(self):
         while self.should_run():
-            frame, timestamp = self.grab()
+            frame, timestamp, metadata = self.grab()
             if frame is not None:
-                self.callback(frame, timestamp)
+                self.callback(frame, timestamp, metadata)
 
 
 class DisplaySubscriber(FrameSubscriber):
@@ -190,7 +194,7 @@ class DisplaySubscriber(FrameSubscriber):
         cv2.moveWindow(self.window_name, self.pos[0], self.pos[1])
 
         while not self.stop_event.is_set():
-            frame, _ = self.grab()
+            frame, _, _ = self.grab()
             if frame is not None:
                 self.render_frame(frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
